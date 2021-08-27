@@ -193,6 +193,13 @@
 <li><a href="https://docs.rs/etk-asm">etk-asm</a></li>
 <li><a href="https://docs.rs/etk-analyze">etk-analyze</a></li>
 </ul>
+<h3 id="dependencies"><a class="header" href="#dependencies">Dependencies</a></h3>
+<p><code>ecfg</code> requires z3 to build
+Ubuntu Installation Instructions (example):</p>
+<pre><code class="language-console">sudo apt-get update -y
+sudo apt-get install -y z3
+</code></pre>
+<p>Check the system logs to confirm that there are no related errors.</p>
 <h2 id="license"><a class="header" href="#license">License</a></h2>
 <p>ETK, all the source code, is released under the <a href="https://raw.githubusercontent.com/quilt/etk/master/LICENSE-APACHE">Apache License Version 2.0</a> and under the <a href="https://raw.githubusercontent.com/quilt/etk/master/LICENSE-MIT">MIT License</a>.</p>
 <h1 id="command-line-tools"><a class="header" href="#command-line-tools">Command-Line Tools</a></h1>
@@ -266,7 +273,7 @@ loop:
     jumpi
 
 pop
-stop                ; This halts execution
+stop                # This halts execution
 <span class="boring">&quot;#;
 </span><span class="boring">let mut ingest = etk_asm::ingest::Ingest::new(Vec::new());
 </span><span class="boring">ingest.ingest(file!(), src).unwrap();
@@ -274,16 +281,21 @@ stop                ; This halts execution
 </span></code></pre></pre>
 <p>The first line—<code>push1 0x00</code>—describes a push instruction of length one, with a value of <code>0</code>. When assembled, this line would become <code>0x6000</code>.</p>
 <p>Next, we have <code>loop:</code>, which introduces a label named <em>loop</em>. Labels can be used as arguments to push instructions, usually for jumps or subroutines.</p>
-<p>Finally, we have <code>; This halts execution</code>, which is a comment. Comments are introduced with <code>;</code> and continue to the end of the line. Comments are ignored as far as the assembler is concerned.</p>
+<p>Finally, we have <code># This halts execution</code>, which is a comment. Comments are introduced with <code>#</code> and continue to the end of the line. Comments are ignored as far as the assembler is concerned.</p>
 <p>There are a couple other features, like macros, which will be covered in later chapters.</p>
 <h3 id="formal-syntax"><a class="header" href="#formal-syntax">Formal Syntax</a></h3>
 <p>For the language nerds, the ETK assembly language syntax is defined by the following <a href="https://pest.rs/">Pest</a> grammar:</p>
-<pre><code class="language-pest">program = _{ SOI ~ &quot;\n&quot;* ~ (stmt ~ &quot;\n&quot;+)* ~ stmt? ~ EOI }
-
+<pre><code class="language-pest">///////////////////////
+// program structure //
+///////////////////////
+program = _{ SOI ~ inner ~ EOI }
+inner = _{ NEWLINE* ~ (stmt ~ (NEWLINE+|&quot;;&quot;))* ~ stmt? }
 stmt = _{ expr }
+expr = _{ label_definition | builtin | push | op }
 
-expr = _{ label_defn | inst_macro | push | op }
-
+//////////////////////
+// opcode mnemonics //
+//////////////////////
 op = @{
 	&quot;origin&quot; | &quot;stop&quot; | &quot;mulmod&quot; | &quot;mul&quot; | &quot;sub&quot; | &quot;div&quot; | &quot;sdiv&quot; | &quot;mod&quot; | &quot;smod&quot; |
 	&quot;addmod&quot; | &quot;exp&quot; | &quot;signextend&quot; | &quot;lt&quot; | &quot;gt&quot; | &quot;slt&quot; |
@@ -299,45 +311,58 @@ op = @{
 	&quot;staticcall&quot; | &quot;revert&quot; | &quot;selfdestruct&quot; | &quot;byte&quot; | &quot;chainid&quot; | &quot;selfbalance&quot; |
 	&quot;basefee&quot; | &quot;invalid&quot;
 }
-
-push = ${ &quot;push&quot; ~  word_size ~ WHITESPACE ~ numeric_argument }
+push = ${ &quot;push&quot; ~  word_size ~ WHITESPACE ~ operand }
 swap = { &quot;swap&quot; ~ half_word_size }
 dup  = { &quot;dup&quot; ~ half_word_size }
 log = { &quot;log&quot; ~ '0'..'4' }
 
-string = @{ &quot;\&quot;&quot; ~ string_char* ~ &quot;\&quot;&quot; }
-string_char = _{ &quot;\\\\&quot; | &quot;\\\&quot;&quot; | (!&quot;\\&quot; ~ !&quot;\&quot;&quot; ~ ANY) }
-
 word_size = @{ ('1'..'2' ~ '0'..'9') | (&quot;3&quot; ~ '0'..'2') | '1'..'9' }
 half_word_size = @{ (&quot;1&quot; ~ '0'..'6') | '1'..'9' }
 
-binary = @{ &quot;0b&quot; ~ ASCII_BIN_DIGIT+ }
-octal = @{ &quot;0o&quot; ~ ASCII_OCT_DIGIT+ }
-decimal = @{ ASCII_DIGIT+ }
-hex = @{ &quot;0x&quot; ~ ASCII_HEX_DIGIT ~ ASCII_HEX_DIGIT+ }
-number = _{ binary | octal | hex | decimal }
-
-selector = { &quot;selector(\&quot;&quot; ~ function_declaration ~ &quot;\&quot;)&quot; }
-function_declaration = { function_name ~ &quot;(&quot; ~ ASCII_ALPHANUMERIC* ~ (&quot;,&quot; ~ ASCII_ALPHANUMERIC+)* ~ &quot;)&quot; }
-function_name = @{ ( ASCII_ALPHA | &quot;_&quot; ) ~ ( ASCII_ALPHANUMERIC | &quot;_&quot; )* }
-
-label = @{ ASCII_ALPHA ~ (ASCII_ALPHANUMERIC | &quot;_&quot;)* }
-label_defn = { label ~ &quot;:&quot; }
-
-arguments = _{ &quot;(&quot; ~ arguments_list? ~ &quot;)&quot; }
-arguments_list = _{ ( argument ~ &quot;,&quot; )* ~ argument? }
-argument = _{ string | numeric_argument }
-numeric_argument = _{ number | selector | label }
-
-inst_macro = ${ &quot;%&quot; ~ ( import | include | include_hex | push_macro ) }
+////////////////////////
+// instruction macros //
+////////////////////////
+builtin = ${ &quot;%&quot; ~ ( import | include | include_hex | push_macro ) }
 
 import = !{ &quot;import&quot; ~ arguments }
 include = !{ &quot;include&quot; ~ arguments }
 include_hex = !{ &quot;include_hex&quot; ~ arguments }
 push_macro = !{ &quot;push&quot; ~ arguments }
 
+arguments = _{ &quot;(&quot; ~ arguments_list? ~ &quot;)&quot; }
+arguments_list = _{ ( argument ~ &quot;,&quot; )* ~ argument? }
+argument = _{ string | operand }
+
+string = @{ &quot;\&quot;&quot; ~ string_char* ~ &quot;\&quot;&quot; }
+string_char = _{ &quot;\\\\&quot; | &quot;\\\&quot;&quot; | (!&quot;\\&quot; ~ !&quot;\&quot;&quot; ~ ANY) }
+
+///////////////////////
+// expression macros //
+///////////////////////
+selector = { &quot;selector(\&quot;&quot; ~ function_declaration ~ &quot;\&quot;)&quot; }
+function_declaration = { function_name ~ &quot;(&quot; ~ ASCII_ALPHANUMERIC* ~ (&quot;,&quot; ~ ASCII_ALPHANUMERIC+)* ~ &quot;)&quot; }
+function_name = @{ ( ASCII_ALPHA | &quot;_&quot; ) ~ ( ASCII_ALPHANUMERIC | &quot;_&quot; )* }
+
+//////////////
+// operands //
+//////////////
+operand = _{ number | selector | label }
+
+number = _{ binary | octal | hex | decimal }
+
+binary = @{ &quot;0b&quot; ~ ASCII_BIN_DIGIT+ }
+octal = @{ &quot;0o&quot; ~ ASCII_OCT_DIGIT+ }
+decimal = @{ ASCII_DIGIT+ }
+hex = @{ &quot;0x&quot; ~ ASCII_HEX_DIGIT ~ ASCII_HEX_DIGIT+ }
+
+label = @{ ASCII_ALPHA ~ (ASCII_ALPHANUMERIC | &quot;_&quot;)* }
+label_definition = { label ~ &quot;:&quot; }
+
+///////////////
+// overrides //
+///////////////
 WHITESPACE = _{ &quot; &quot; | &quot;\t&quot; }
-COMMENT = _{ &quot;;&quot; ~ (!&quot;\n&quot; ~ ANY)* }
+COMMENT = _{ &quot;#&quot; ~ (!NEWLINE ~ ANY)* }
 </code></pre>
 <h1 id="instructions"><a class="header" href="#instructions">Instructions</a></h1>
 <p>Instructions, also known as opcodes or <code>Op</code>s internally, are the building blocks of ETK smart contracts. Each instruction has a human-readable mnemonic (like <code>dup3</code>) and the machine readable equivalent (which would be <code>0x82</code>). The <code>push</code> family of instructions also encode an immediate value (or argument.)</p>
@@ -501,16 +526,16 @@ selfdestruct
 </span><span class="boring">fn main() {
 </span><span class="boring">extern crate etk_asm;
 </span><span class="boring">let src = r#&quot;
-</span>label0:             ; &lt;- This is a label called &quot;label0&quot;,
-                    ;    and it has the value 0, since it is
-                    ;    before any instructions in scope.
+</span>label0:             # &lt;- This is a label called &quot;label0&quot;,
+                    #    and it has the value 0, since it is
+                    #    before any instructions in scope.
 
     jumpdest
-    push1 label0    ; &lt;- Here we push the value of &quot;label0&quot;,
-                    ;    which is zero, onto the stack.
+    push1 label0    # &lt;- Here we push the value of &quot;label0&quot;,
+                    #    which is zero, onto the stack.
 
-    jump            ; Now we jump to zero, which is a
-                    ; `jumpdest` instruction, looping forever.
+    jump            # Now we jump to zero, which is a
+                    # `jumpdest` instruction, looping forever.
 <span class="boring">&quot;#;
 </span><span class="boring">let mut ingest = etk_asm::ingest::Ingest::new(Vec::new());
 </span><span class="boring">ingest.ingest(file!(), src).unwrap();
@@ -529,7 +554,7 @@ selfdestruct
 </span><span class="boring">let src = r#&quot;
 </span>push1 start
 push1 end
-sub                 ; &lt;- Will leave a 3 on the stack.
+sub                 # &lt;- Will leave a 3 on the stack.
 stop
 
 start:
@@ -620,14 +645,14 @@ stop
 </ul>
 <p>The path is resolved relative to the current file.</p>
 <h4 id="source-mainetk-1"><a class="header" href="#source-mainetk-1">Source: <code>main.etk</code></a></h4>
-<pre><code class="language-ignore">some_label:                 ; &lt;- Not visible in `other.etk`.
-    push1 some_label        ; &lt;- Pushes a zero on the stack.
+<pre><code class="language-ignore">some_label:                 # &lt;- Not visible in `other.etk`.
+    push1 some_label        # &lt;- Pushes a zero on the stack.
 
 %include(&quot;other.etk&quot;)
 </code></pre>
 <h4 id="source-otheretk-1"><a class="header" href="#source-otheretk-1">Source: <code>other.etk</code></a></h4>
-<pre><code class="language-ignore">different_label:            ; &lt;- Not visible in `main.etk`.
-    push1 different_label   ; &lt;- ALSO pushes a zero on the stack.
+<pre><code class="language-ignore">different_label:            # &lt;- Not visible in `main.etk`.
+    push1 different_label   # &lt;- ALSO pushes a zero on the stack.
 </code></pre>
 <h4 id="after-expansion-1"><a class="header" href="#after-expansion-1">After Expansion</a></h4>
 <pre><code class="language-ignore">push1 0x00
@@ -667,7 +692,7 @@ jumpdest
 </span><span class="boring">fn main() {
 </span><span class="boring">extern crate etk_asm;
 </span><span class="boring">let src = r#&quot;
-</span>push4 selector(&quot;_burn(address,bytes32,uint256)&quot;)    ; &lt;- expands to 0x63936327
+</span>push4 selector(&quot;_burn(address,bytes32,uint256)&quot;)    # &lt;- expands to 0x63936327
 <span class="boring">&quot;#;
 </span><span class="boring">let mut output = Vec::new();
 </span><span class="boring">let mut ingest = etk_asm::ingest::Ingest::new(&amp;mut output);
